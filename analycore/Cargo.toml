@@ -1,0 +1,10 @@
+[package]
+name = "analycore"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log.workspace = true
+
+[package.metadata.rust-analyzer]
+rustc_private = true

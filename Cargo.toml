@@ -1,0 +1,13 @@
+[workspace]
+members = [".", "analycore"]
+
+[workspace.dependencies]
+log = "0.4.22"
+
+[package]
+name = "ownborrow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log.workspace = true
