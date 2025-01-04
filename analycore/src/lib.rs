@@ -14,68 +14,73 @@ pub extern crate rustc_middle;
 pub extern crate rustc_session;
 pub extern crate rustc_span;
 
-use rustc_borrowck::consumers;
-use rustc_interface::interface;
-use rustc_session::config;
-use rustc_span::{FileName, RealFileName};
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc};
 
-pub fn enter(name: PathBuf, source: &str) {
-    let config = interface::Config {
-        opts: config::Options {
-            debuginfo: config::DebugInfo::Full,
-            error_format: config::ErrorOutputType::Json {
-                pretty: true,
-                json_rendered: rustc_errors::emitter::HumanReadableErrorType::Default,
-                color_config: rustc_errors::ColorConfig::Auto,
-            },
-            unstable_opts: config::UnstableOptions {
-                polonius: config::Polonius::Legacy,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        input: config::Input::Str {
-            name: FileName::Real(RealFileName::LocalPath(name)),
-            input: source.to_owned(),
-        },
-        output_dir: None,
-        output_file: None,
-        file_loader: None,
-        lint_caps: HashMap::default(),
-        register_lints: None,
-        override_queries: None,
-        registry: rustc_driver::diagnostics_registry(),
-        crate_cfg: vec![],
-        crate_check_cfg: vec![],
-        expanded_args: vec![],
-        hash_untracked_state: None,
-        ice_file: None,
-        locale_resources: rustc_driver::DEFAULT_LOCALE_RESOURCES.to_owned(),
-        make_codegen_backend: None,
-        psess_created: None,
-        using_internal_features: Arc::new(AtomicBool::new(true)),
+#[derive(Clone, PartialEq, Debug)]
+pub enum Error {
+    ArgIndexOut,
+    FnNotFound,
+    Internal,
+}
+
+pub fn rewrite_fn(name: PathBuf, source: String, fn_name: &str) -> Result<String, Error> {
+    let do_rewrite = |source: String, arg_nth: usize| {
+        enter::enter(name.clone(), source.clone(), |ctx| {
+            if let Some(item) = enter::get_fn(ctx, fn_name) {
+                let (sig, gen, bid) = item.expect_fn();
+                if sig.decl.inputs.len() <= arg_nth {
+                    return Err(Error::ArgIndexOut);
+                }
+                return Ok(rewrite::rewrite(
+                    source,
+                    ctx,
+                    *sig,
+                    *gen,
+                    bid.hir_id.owner.def_id,
+                    arg_nth,
+                )
+                .map_err(|_| Error::Internal)?);
+            }
+            Err(Error::FnNotFound)
+        })
     };
-    log::info!("compiler configured; start compilation");
-
-    interface::run_compiler(config, |compiler| {
-        log::info!("entered into interface::run_compiler");
-
-        compiler.enter(|queries| {
-            log::info!("entered into compiler");
-
-            let Ok(mut gcx) = queries.global_ctxt() else {
-                log::error!("error on fetching global context");
-                //return Err((Error::UnknownError, None));
-                return;
-            };
-
-            gcx.enter(|ctx| {
-                log::info!("entered into global context");
-                for item_id in ctx.hir().items() {}
-            });
-        });
-    });
+    let do_check = |source: String| {
+        log::info!("type & borrow check");
+        enter::enter(name.clone(), source, |ctx| {
+            if let Some(item) = enter::get_fn(ctx, fn_name) {
+                let (sig, gen, bid) = item.expect_fn();
+                let bck = rewrite::borrowck(ctx, bid.hir_id.owner.def_id);
+                let errors = bck.output_facts.unwrap().errors;
+                if 0 == errors.len() {
+                    log::info!("type & borrow check ok");
+                    return Ok(true);
+                } else {
+                    log::warn!("type & borrow check failed\n{:?}", errors);
+                }
+            }
+            Ok(false)
+        })
+    };
+    let mut updated = source;
+    for i in 0.. {
+        log::info!("{}th arg rewrite start", i);
+        let upd = do_rewrite(updated.clone(), i);
+        match upd {
+            Ok(Some(upd)) => {
+                log::info!("{i}th rewritten");
+                if do_check(upd.clone()) == Ok(true) {
+                    updated = upd;
+                }
+            }
+            Err(Error::ArgIndexOut) => {
+                log::info!("arg index out of range");
+                break;
+            }
+            Err(e) => {
+                return Err(e);
+            }
+            _ => {}
+        }
+    }
+    Ok(updated)
 }

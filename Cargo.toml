@@ -10,4 +10,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+analycore.path = "./analycore"
 log.workspace = true
+simple_logger = "5.0.0"
