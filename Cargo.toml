@@ -5,7 +5,7 @@ members = [".", "analycore"]
 log = "0.4.22"
 
 [package]
-name = "ownborrow"
+name = "elimclone"
 version = "0.1.0"
 edition = "2021"
 
